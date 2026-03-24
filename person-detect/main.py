@@ -28,7 +28,8 @@ class WallHacksDetector:
         print("Initializing WallHacks Person Detector...")
 
         # Initialize components
-        self.camera = Camera(camera_id=0, width=1280, height=720)
+        
+        self.camera = Camera(camera_id=int(input("Enter camera ID: ")), width=1280, height=720)
         self.detector = PersonDetector(
             model_complexity=1,
             min_detection_confidence=0.5,
@@ -178,7 +179,11 @@ class WallHacksDetector:
         """
         print(f"\nStarting WebSocket server on {host}:{port}...")
 
-        self.stream_server = PoseStreamServer(host=host, port=port)
+        self.stream_server = PoseStreamServer(
+            host=host,
+            port=port,
+            on_alignment_heading=self._handle_alignment_heading,
+        )
 
         # Create new event loop for server thread
         def run_server():
@@ -193,6 +198,14 @@ class WallHacksDetector:
         # Give server time to start
         time.sleep(1)
         print(f"WebSocket server started at ws://{host}:{port}")
+
+    def _handle_alignment_heading(self, heading_radians: float) -> None:
+        """Update processor heading when iPhone sends alignment capture."""
+        self.processor.set_alignment_heading(heading_radians)
+        print(
+            "Alignment heading updated from iPhone: "
+            f"{heading_radians:.4f} rad ({heading_radians * 180.0 / 3.141592653589793:.2f} deg)"
+        )
 
     def _broadcast_pose_data(self, pose_data) -> None:
         """

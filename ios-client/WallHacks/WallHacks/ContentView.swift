@@ -2,12 +2,12 @@
 //  ContentView.swift
 //  WallHacks
 //
-//  Phase 2 minimal UI for testing WebSocket data streaming
+//  Archived Phase 2 UI retained for reference only.
 //
 
 import SwiftUI
 
-struct ContentView: View {
+struct LegacyContentView: View {
     @StateObject private var webSocketClient = WebSocketClient()
     @State private var serverURL: String = "ws://192.168.0.232:8765"
     @State private var showingKeypoints = false
@@ -251,8 +251,8 @@ struct KeypointsListView: View {
 
 // MARK: - Preview
 
-struct ContentView_Previews: PreviewProvider {
+struct LegacyContentView_Previews: PreviewProvider {
     static var previews: some View {
-        ContentView()
+        LegacyContentView()
     }
 }

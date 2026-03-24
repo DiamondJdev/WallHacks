@@ -3,7 +3,8 @@
 import asyncio
 import json
 import logging
-from typing import Set, Dict, Any, Optional
+import math
+from typing import Set, Dict, Any, Optional, Callable
 import websockets
 from websockets.server import WebSocketServerProtocol
 
@@ -16,16 +17,23 @@ logger = logging.getLogger(__name__)
 class PoseStreamServer:
     """WebSocket server for broadcasting pose data to connected clients."""
 
-    def __init__(self, host: str = "0.0.0.0", port: int = 8765):
+    def __init__(
+        self,
+        host: str = "0.0.0.0",
+        port: int = 8765,
+        on_alignment_heading: Optional[Callable[[float], None]] = None
+    ):
         """
         Initialize the pose streaming server.
 
         Args:
             host: Host address to bind to (0.0.0.0 for all interfaces)
             port: Port number for WebSocket server
+            on_alignment_heading: Callback invoked on alignment updates from client
         """
         self.host = host
         self.port = port
+        self.on_alignment_heading = on_alignment_heading
         self.clients: Set[WebSocketServerProtocol] = set()
         self.server: Optional[websockets.WebSocketServer] = None
         self._running = False
@@ -77,8 +85,7 @@ class PoseStreamServer:
         try:
             # Keep connection alive and handle incoming messages
             async for message in websocket:
-                # Echo received messages (for testing/debugging)
-                logger.debug(f"Received from {client_address}: {message}")
+                await self._handle_message(message, websocket)
 
         except websockets.exceptions.ConnectionClosed:
             logger.info(f"Client disconnected: {client_address}")
@@ -90,6 +97,46 @@ class PoseStreamServer:
             # Remove client from set
             self.clients.discard(websocket)
             logger.info(f"Client removed: {client_address} (Remaining: {len(self.clients)})")
+
+    async def _handle_message(
+        self,
+        message: str,
+        websocket: WebSocketServerProtocol
+    ) -> None:
+        """Handle incoming client control messages."""
+        client_address = websocket.remote_address
+
+        try:
+            data = json.loads(message)
+        except json.JSONDecodeError:
+            logger.debug(f"Non-JSON message from {client_address}")
+            return
+
+        if data.get("type") != "alignment_heading":
+            logger.debug(f"Unhandled message type from {client_address}: {data.get('type')}")
+            return
+
+        heading = data.get("heading_radians")
+        if not isinstance(heading, (int, float)):
+            logger.warning(f"Invalid heading payload from {client_address}: {data}")
+            return
+
+        heading_value = float(heading)
+        if not math.isfinite(heading_value):
+            logger.warning(f"Non-finite heading payload from {client_address}: {data}")
+            return
+
+        heading_value = math.atan2(math.sin(heading_value), math.cos(heading_value))
+
+        if self.on_alignment_heading is not None:
+            self.on_alignment_heading(heading_value)
+
+        logger.info(
+            "Received alignment heading %.4f rad (%.2f deg) from %s",
+            heading_value,
+            heading_value * 180.0 / 3.141592653589793,
+            client_address,
+        )
 
     async def broadcast(self, pose_data: Dict[str, Any]) -> None:
         """

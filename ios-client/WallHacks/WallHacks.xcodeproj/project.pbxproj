@@ -400,6 +400,8 @@
 				DEVELOPMENT_TEAM = CUK6MYBDNQ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "WallHacks uses the camera for AR tracking to display person positions through walls.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "WallHacks connects to a local MacBook server to receive pose data.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -432,6 +434,8 @@
 				DEVELOPMENT_TEAM = CUK6MYBDNQ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "WallHacks uses the camera for AR tracking to display person positions through walls.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "WallHacks connects to a local MacBook server to receive pose data.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

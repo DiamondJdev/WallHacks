@@ -1,7 +1,7 @@
 # 👁️ Sensor Fusion AR — Project Brief
 
 **Project Name:** Through-Wall AR Person Tracker  
-**Version:** 0.2 — Relative Positioning Architecture  
+**Version:** 0.3 — MVP (Anchor-Calibrated Relative Tracking)  
 **Date:** March 2026  
 **Hardware:** MacBook (any model) + iPhone 15 Pro
 
@@ -9,7 +9,7 @@
 
 ## Overview
 
-A two-device sensor fusion system that detects a person in one room using a MacBook laptop camera, then renders a real-time AR silhouette of that person on an iPhone 15 Pro — as if the user could see through the wall. The system uses a **relative positioning approach**: rather than pre-mapping the environment, the iPhone tracks its own pose continuously via ARKit, and the laptop streams the person's position as a direction vector + depth estimate every frame. No room scanning, no anchor maps, and no persistent calibration data is required.
+A two-device sensor fusion system that detects a person in one room using a MacBook laptop camera, then renders a real-time AR silhouette of that person on an iPhone 15 Pro — as if the user could see through the wall. The system now uses an **anchor-calibrated relative positioning approach**: on launch, the iPhone captures the laptop anchor position and heading, then ARKit tracks the iPhone continuously while the laptop streams the person's keypoints in metric laptop-relative space.
 
 ---
 
@@ -18,8 +18,23 @@ A two-device sensor fusion system that detects a person in one room using a MacB
 - Detect and track a person's pose in real time using the MacBook camera
 - Stream skeleton/pose data over a local network to an iPhone app at ~30fps
 - Render a glowing AR silhouette at the correct relative world position on the iPhone
-- Maintain spatial accuracy with **no pre-mapping** — only a 3-second heading alignment on first launch
+- Maintain spatial accuracy with **no pre-mapping** — one-time laptop-side calibration on first launch
 - Update the silhouette position every frame while the person is in camera view
+
+---
+
+## MVP Status
+
+✅ MVP now working end-to-end with:
+
+- One-time calibration beside the laptop:
+  - iPhone captures laptop anchor world position
+  - iPhone sends heading to laptop over WebSocket
+- Python streams keypoints in metric laptop-relative coordinates
+- iOS converts laptop-relative keypoints to AR world coordinates and renders skeleton
+- In-app diagnostics:
+  - laptop anchor marker in AR scene
+  - iPhone/laptop vector + distance readout in debug overlay
 
 ---
 
@@ -31,25 +46,25 @@ A two-device sensor fusion system that detects a person in one room using a MacB
 | Depth estimation | MediaPipe Z landmarks (free, built-in) or Intel RealSense (optional upgrade) |
 | Data transport | WebSocket over local Wi-Fi (JSON pose packets, ~30fps) |
 | Spatial tracking | ARKit local session tracking — no world map required |
-| Heading alignment | One-time manual alignment on app launch (~3 seconds) |
+| Heading alignment | One-time manual calibration beside laptop |
 | AR rendering | RealityKit (iPhone) |
 | LiDAR usage | iPhone 15 Pro LiDAR — depth masking + faster ARKit init |
 
 ---
 
-## Core Concept: Relative Positioning
+## Core Concept: Anchor-Calibrated Relative Positioning
 
-The key architectural insight is that **absolute world coordinates are not needed**. Instead, every frame computes:
+The key architectural insight is to capture a single laptop anchor and then stream person coordinates relative to that anchor:
 
 ```
-Person world position  (laptop camera + depth estimate)
-         −
-iPhone world position  (ARKit continuous tracking)
+Person local position (laptop-relative, meters)
+         +
+Laptop anchor world position (captured on iPhone)
          =
-Direction vector from iPhone to person  →  render silhouette here
+Person world position for AR rendering
 ```
 
-ARKit tracks the iPhone's pose in its own local coordinate space from the moment a session starts — no pre-scanning required. The laptop contributes a direction + distance to the person. Combined, these give a precise relative position that updates every frame.
+ARKit tracks the iPhone's pose in its own local coordinate space from the moment a session starts — no pre-scanning required. The laptop contributes person keypoints in a calibrated metric frame. Combined with the captured laptop anchor, these give stable world placement that updates every frame.
 
 ---
 
@@ -73,13 +88,17 @@ ARKit tracks the iPhone's pose in its own local coordinate space from the moment
 
 ## Alignment Process (One-Time Per Session, ~3 Seconds)
 
-No room scanning or persistent map data is needed. A single heading alignment is performed when the app launches:
+No room scanning or persistent map data is needed. A single calibration is performed when the app launches:
 
-1. Point the iPhone camera toward the wall separating the two rooms (toward Room A)
-2. Press **"Align"** in the app
-3. The app records ARKit's current heading as the reference forward direction
-4. The laptop camera's forward axis is mathematically mapped to that heading
-5. Alignment is complete — the session is live
+1. Stand beside the laptop in Room A
+2. Point the iPhone in the same forward direction as the laptop camera
+3. Press **"Capture Alignment"** in the app
+4. iPhone captures:
+  - current ARKit heading
+  - current ARKit world position as the laptop anchor
+5. iPhone sends heading to the laptop via WebSocket control message
+6. Python rotates outgoing keypoints by that heading
+7. Move to Room B and start AR tracking
 
 > ⚠️ Re-alignment is only needed if the laptop camera is physically rotated or the iPhone is restarted. Moving around Room B freely does **not** require re-alignment.
 
@@ -114,17 +133,16 @@ Yw =  Yc                           (vertical axis unchanged)
 Zw = -Xc · sin(α) + Zc · cos(α)
 ```
 
-### Step 3 — Render on iPhone
+### Step 3 — Convert to AR World Coordinates on iPhone
 
 ```
-Silhouette position = [Xw, Yw, Zw]  (received via WebSocket)
-iPhone pose         = ARKit simdWorldTransform (updated every frame)
+Laptop anchor world position = [Ax, Ay, Az]  (captured during calibration)
+Streamed person local point  = [Xw, Yw, Zw]  (laptop-relative)
 
-Final render point  = Silhouette position − iPhone position
-                      (expressed in ARKit local space)
+Render world point = [Ax, Ay, Az] + [Xw, Yw, Zw]
 ```
 
-RealityKit places a 3D entity at this point, which automatically stays anchored in space as the iPhone moves.
+RealityKit places entities at this world point, which stays anchored as the iPhone moves.
 
 ---
 
@@ -166,7 +184,9 @@ Each frame sends a lightweight JSON packet:
 ```json
 {
   "timestamp": 1711234567.891,
-  "depth_method": "mediapipe_z",
+  "sequence_number": 1024,
+  "coordinate_space": "meters_camera_aligned",
+  "estimated_depth_meters": 2.36,
   "keypoints": [
     { "id": 0,  "name": "nose",           "x": 0.12, "y": -0.03, "z": 2.41, "confidence": 0.98 },
     { "id": 11, "name": "left_shoulder",  "x": 0.18, "y": -0.45, "z": 2.38, "confidence": 0.95 },
@@ -177,7 +197,7 @@ Each frame sends a lightweight JSON packet:
 }
 ```
 
-- `x`, `y`, `z` are in **meters**, expressed in ARKit-aligned world space after heading rotation
+- `x`, `y`, `z` are in **meters**, expressed in laptop-relative aligned space after heading rotation
 - `confidence` gates rendering — keypoints below ~0.6 are skipped
 - Full 33-keypoint MediaPipe skeleton is sent; iPhone selects which to render
 
@@ -189,7 +209,8 @@ Depth accuracy is the primary driver of silhouette placement quality. Options ra
 
 | Method | Accuracy | Cost | Notes |
 |---|---|---|---|
-| **MediaPipe Z estimate** | ±0.2 – 0.5 m | Free | Built into pose landmarks, best starting point |
+| **PnP + MediaPipe landmarks (current MVP)** | ±0.2 – 0.5 m (scene dependent) | Free | Multi-landmark solvePnP with fallback heuristics |
+| **MediaPipe Z estimate** | ±0.2 – 0.5 m | Free | Used as fallback cue |
 | **Skeleton height heuristic** | ±0.3 – 0.8 m | Free | Compare pixel height to known avg human height (1.7m) |
 | **Stereo webcams** | ±0.05 – 0.2 m | ~$0 (2 webcams) | Requires baseline measurement between cameras |
 | **Intel RealSense** | ±0.01 – 0.05 m | ~$200 | USB depth camera, highest accuracy upgrade |
@@ -223,18 +244,19 @@ LiDAR is not required for the core positioning system, but enhances the experien
 - Define JSON packet format (see above)
 - Build a basic iPhone receiver app and confirm data arrives correctly
 
-### Phase 3 — ARKit Relative Tracking ← Current
+### Phase 3 — ARKit Relative Tracking ✅ ./ios-client
 
 - Build the iPhone ARKit session (local tracking, no world map configuration)
 - Implement the heading alignment UI ("Align" button on launch)
 - Store alignment angle and apply rotation matrix to incoming keypoints
 - Validate that relative positions update correctly as iPhone moves
 
-### Phase 4 — AR Rendering
+### Phase 4 — AR Rendering ✅ ./ios-client + ./person-detect
 
-- Render a basic 3D skeleton or silhouette using RealityKit entities
-- Connect keypoint positions to entity transforms, updated every frame
-- Validate that the silhouette stays anchored in space during iPhone movement
+- Render reduced 3D skeleton using RealityKit entities
+- Interpolate/smooth incoming packets for stable rendering
+- Convert laptop-relative keypoints into AR world coordinates via laptop anchor
+- Add diagnostics (anchor marker + vector/distance HUD)
 
 ### Phase 5 — LiDAR Integration & Polish
 
@@ -248,7 +270,7 @@ LiDAR is not required for the core positioning system, but enhances the experien
 
 | Scenario | Expected Positional Error |
 |---|---|
-| MediaPipe Z depth, good lighting | ±0.2 – 0.5 m |
+| PnP + fallback depth, good lighting | ±0.2 – 0.5 m |
 | Skeleton height heuristic | ±0.3 – 0.8 m |
 | Intel RealSense depth camera | ±0.01 – 0.05 m |
 | Heading misaligned by 5° | ~0.2 m lateral drift at 2 m distance |
@@ -260,7 +282,7 @@ LiDAR is not required for the core positioning system, but enhances the experien
 ## Constraints & Assumptions
 
 - Both devices must be on the **same local Wi-Fi network**
-- The MacBook camera is **fixed** after alignment (rotating it requires re-alignment)
+- The MacBook camera is **fixed** after calibration (rotating it requires re-alignment)
 - Person is assumed to be **upright** for pose estimation heuristics
 - ARKit requires reasonable ambient light in Room B to maintain tracking
 - Single person tracking in Phase 1 (multi-person is a future enhancement)
